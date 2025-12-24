@@ -1,50 +1,118 @@
-
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>中日说 | CNJP Input - 极速语音识别，跨越语言鸿沟</title>
+    <title>中日说 | CNJP Input - 极速语音识别，跨越语言沟通</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Serif+JP:wght@400;500;700;900&family=Noto+Serif+SC:wght@400;500;700;900&display=swap"
+        rel="stylesheet">
     <style>
+        html,
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-family: 'Inter', 'Noto Serif SC', 'Noto Serif JP', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
             scroll-behavior: smooth;
             -webkit-font-smoothing: antialiased;
+            background-color: #121212;
+            cursor: none;
         }
+
+        /* Essential for ensuring custom cursor shows everywhere */
+        a,
+        button,
+        [role="button"],
+        input,
+        textarea,
+        .cursor-pointer {
+            cursor: none !important;
+        }
+
         .glass {
-            background: rgba(255, 255, 255, 0.7);
+            background: rgba(25, 25, 25, 0.3);
             backdrop-filter: blur(20px);
             -webkit-backdrop-filter: blur(20px);
-            border: 1px solid rgba(0, 0, 0, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.05);
         }
-        .text-gradient {
-            background: linear-gradient(to right, #2563eb, #7c3aed);
+
+        .text-rainbow {
+            background: linear-gradient(to right, #9333ea, #ef4444, #f59e0b, #10b981, #3b82f6, #9333ea);
+            background-size: 200% auto;
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+            animation: rainbow-flow 4s linear infinite;
         }
-        .hero-glow {
+
+        .rainbow-border {
+            position: relative;
+        }
+
+        .rainbow-border::after {
+            content: '';
             position: absolute;
-            top: -10%;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 80%;
-            height: 60%;
-            background: radial-gradient(circle, rgba(59, 130, 246, 0.08) 0%, rgba(255,255,255,0) 70%);
-            z-index: -1;
-            pointer-events: none;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(to right, #9333ea, #ef4444, #f59e0b, #10b981, #3b82f6, #9333ea);
+            background-size: 200% auto;
+            animation: rainbow-flow 4s linear infinite;
+            opacity: 0.5;
         }
-        @keyframes float {
-            0% { transform: translateY(0px); }
-            50% { transform: translateY(-10px); }
-            100% { transform: translateY(0px); }
+
+        .rainbow-bg-flow {
+            background: linear-gradient(135deg, #121212, #121212, #9333ea, #ef4444, #f59e0b, #10b981, #3b82f6, #121212, #121212);
+            background-size: 300% 300%;
+            animation: rainbow-bg-flow 6s ease infinite;
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
-        .animate-float {
-            animation: float 4s ease-in-out infinite;
+
+        .float-hanging {
+            animation: float-hanging 8s ease-in-out infinite;
+        }
+
+        @keyframes float-hanging {
+
+            0%,
+            100% {
+                transform: translate3d(0, 0, 0) rotate(0deg);
+            }
+
+            25% {
+                transform: translate3d(1px, -3px, 0) rotate(0.2deg);
+            }
+
+            50% {
+                transform: translate3d(0, -6px, 0) rotate(0deg);
+            }
+
+            75% {
+                transform: translate3d(-1px, -3px, 0) rotate(-0.2deg);
+            }
+        }
+
+        @keyframes rainbow-bg-flow {
+            0% {
+                background-position: 0% 50%;
+            }
+
+            50% {
+                background-position: 100% 50%;
+            }
+
+            100% {
+                background-position: 0% 50%;
+            }
+        }
+
+        @keyframes rainbow-flow {
+            to {
+                background-position: 200% center;
+            }
         }
     </style>
-<script type="importmap">
+    <script type="importmap">
 {
   "imports": {
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
@@ -56,10 +124,12 @@
   }
 }
 </script>
-<link rel="stylesheet" href="/index.css">
+    <link rel="stylesheet" href="/index.css">
 </head>
-<body class="bg-zinc-50 text-zinc-900 overflow-x-hidden">
+
+<body class="bg-[#121212] overflow-x-hidden">
     <div id="root"></div>
-<script type="module" src="/index.tsx"></script>
+    <script type="module" src="/index.tsx"></script>
 </body>
+
 </html>
