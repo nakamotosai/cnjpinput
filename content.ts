@@ -10,8 +10,8 @@ export const CONFIG = {
 
   // 下载链接配置
   download: {
-    url: "https://hf-mirror.com/nakamotosai/cnjp-input/resolve/main/cnjp_input_setup_v1.0.0.exe",
-    urlInternational: "https://huggingface.co/nakamotosai/cnjp-input/resolve/main/cnjp_input_setup_v1.0.0.exe",
+    url: "https://ghproxy.net/https://github.com/nakamotosai/cnjpinput/releases/download/v1.0.0/cnjp_input_setup_v1.0.0.exe",
+    urlInternational: "https://github.com/nakamotosai/cnjpinput/releases/download/v1.0.0/cnjp_input_setup_v1.0.0.exe",
     fileSize: "约 300MB"
   },
 
