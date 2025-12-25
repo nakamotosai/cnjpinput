@@ -44,30 +44,56 @@ const InteractiveText: React.FC<{
   brightness?: number,
   baseColor?: string
 }> = ({ children, className = "", brightness = 0.5, baseColor = "text-zinc-500" }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        // 当元素进入视口或接近视口时开启渲染
+        setIsVisible(entry.isIntersecting);
+      },
+      {
+        rootMargin: "100px", // 提前 100px 预加载，防止闪烁
+        threshold: 0
+      }
+    );
+
+    if (containerRef.current) {
+      observer.observe(containerRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <div className={`relative inline-block ${className}`}>
+    <div ref={containerRef} className={`relative inline-block ${className}`}>
       {/* Base Layer */}
       <div className={`${baseColor} transition-colors duration-300`}>
         {children}
       </div>
       {/* Glow Layer (Clipped to Text) - Muted Rainbow Colors */}
-      <div
-        className="absolute inset-0 pointer-events-none select-none text-transparent bg-clip-text"
-        style={{
-          backgroundImage: `radial-gradient(
-            220px circle at var(--mouse-x) var(--mouse-y),
-            rgba(255, 80, 80, ${brightness}) 0%,
-            rgba(255, 200, 80, ${brightness * 0.9}) 20%,
-            rgba(80, 255, 120, ${brightness * 0.8}) 40%,
-            rgba(80, 160, 255, ${brightness * 0.9}) 60%,
-            rgba(180, 80, 255, ${brightness}) 80%,
-            rgba(255,255,255,0) 100%
-          )`,
-          backgroundAttachment: 'fixed'
-        }}
-      >
-        {children}
-      </div>
+      {/* 只有在视口内时才渲染这个极其昂贵的图层 */}
+      {isVisible && (
+        <div
+          className="absolute inset-0 pointer-events-none select-none text-transparent bg-clip-text"
+          style={{
+            backgroundImage: `radial-gradient(
+              220px circle at var(--mouse-x) var(--mouse-y),
+              rgba(255, 80, 80, ${brightness}) 0%,
+              rgba(255, 200, 80, ${brightness * 0.9}) 20%,
+              rgba(80, 255, 120, ${brightness * 0.8}) 40%,
+              rgba(80, 160, 255, ${brightness * 0.9}) 60%,
+              rgba(180, 80, 255, ${brightness}) 80%,
+              rgba(255,255,255,0) 100%
+            )`,
+            backgroundAttachment: 'fixed',
+            willChange: 'background-image' // 提示浏览器优化
+          }}
+        >
+          {children}
+        </div>
+      )}
     </div>
   );
 };
@@ -99,9 +125,9 @@ const CustomCursor: React.FC = () => {
 
   return (
     <div
-      className="fixed top-0 left-0 w-4 h-4 rounded-full pointer-events-none z-[9999] rainbow-bg-flow shadow-lg transition-transform duration-75 ease-out"
+      className="fixed top-0 left-0 w-2.5 h-2.5 rounded-full pointer-events-none z-[9999] rainbow-bg-flow shadow-lg transition-transform duration-75 ease-out"
       style={{
-        transform: `translate3d(calc(var(--mouse-x) - 8px), calc(var(--mouse-y) - 8px), 0) scale(${isClicking ? 0.7 : (isHovering ? 1.4 : 1)})`,
+        transform: `translate3d(calc(var(--mouse-x) - 5px), calc(var(--mouse-y) - 5px), 0) scale(${isClicking ? 0.7 : (isHovering ? 1.4 : 1)})`,
         border: '1px solid rgba(255,255,255,0.2)'
       }}
     />
@@ -112,18 +138,50 @@ const CustomCursor: React.FC = () => {
 // Mouse Glow Effect Component
 // ----------------------------------------------------------------------
 const MouseGlow: React.FC = () => {
-  const [mousePos, setMousePos] = useState({ x: -1000, y: -1000 });
+  const glowRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      const x = e.clientX;
-      const y = e.clientY;
-      setMousePos({ x, y });
-      document.documentElement.style.setProperty('--mouse-x', `${x}px`);
-      document.documentElement.style.setProperty('--mouse-y', `${y}px`);
+    let rAFId: number;
+    // 使用 mutable object 存储坐标
+    // pos: 鼠标实时目标位置
+    // current: 光球当前位置 (用于实现平滑跟随)
+    const pos = { x: -1000, y: -1000 };
+    const current = { x: -1000, y: -1000 };
+
+    const update = () => {
+      // 1. 直接更新 CSS 变量，供 InteractiveText 和 CustomCursor 使用
+      // 文字光效和鼠标指针应当是"跟手"的，所以使用实时鼠标坐标
+      document.documentElement.style.setProperty('--mouse-x', `${pos.x}px`);
+      document.documentElement.style.setProperty('--mouse-y', `${pos.y}px`);
+
+      // 2. 光球使用 LERP (线性插值) 实现平滑延迟跟随效果
+      // 缓动系数 0.08，数值越小越迟缓 (原版 CSS transition duration-1000 约等于极低的缓动)
+      const ease = 0.08;
+      // 简单的线性插值算法: 当前值 += (目标值 - 当前值) * 系数
+      current.x += (pos.x - current.x) * ease;
+      current.y += (pos.y - current.y) * ease;
+
+      // 3. 直接操作 DOM 变换，避开 React Render Cycle
+      if (glowRef.current) {
+        glowRef.current.style.transform = `translate3d(${current.x - 200}px, ${current.y - 200}px, 0)`;
+      }
+
+      rAFId = requestAnimationFrame(update);
     };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      pos.x = e.clientX;
+      pos.y = e.clientY;
+    };
+
     window.addEventListener('mousemove', handleMouseMove);
-    return () => window.removeEventListener('mousemove', handleMouseMove);
+    // 启动动画循环
+    rAFId = requestAnimationFrame(update);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      cancelAnimationFrame(rAFId);
+    };
   }, []);
 
   return (
@@ -131,9 +189,11 @@ const MouseGlow: React.FC = () => {
       <CustomCursor />
       <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden" aria-hidden="true">
         <div
-          className="absolute w-[400px] h-[400px] rounded-full transition-transform duration-1000 ease-out opacity-40 mix-blend-screen"
+          ref={glowRef}
+          className="absolute w-[400px] h-[400px] rounded-full transition-opacity duration-1000 ease-out opacity-40 mix-blend-screen"
           style={{
-            transform: `translate3d(${mousePos.x - 200}px, ${mousePos.y - 200}px, 0)`,
+            // 初始位置移出屏幕
+            transform: 'translate3d(-1000px, -1000px, 0)',
             background: `radial-gradient(circle, 
               rgba(255, 50, 50, 0.4) 0%, 
               rgba(255, 200, 50, 0.35) 20%, 
@@ -142,6 +202,7 @@ const MouseGlow: React.FC = () => {
               rgba(180, 50, 255, 0.4) 80%, 
               transparent 100%)`,
             filter: 'blur(70px)',
+            willChange: 'transform' // 提示浏览器开启 GPU 层
           }}
         />
       </div>
@@ -412,9 +473,9 @@ const App: React.FC = () => (
       {/* Row 1: Hero & Intro */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         {/* Hero Card */}
-        <div className="lg:col-span-8 glass p-8 md:p-12 rounded-[32px] flex flex-col justify-end relative overflow-hidden group min-h-[440px]">
-          <div className="space-y-6 relative z-10 w-fit">
-            <div className="inline-flex flex-col gap-1 px-5 py-3 rounded-2xl bg-white/5 border border-white/10 mb-4 transition-all">
+        <div className="lg:col-span-8 glass p-8 md:p-12 rounded-[32px] flex flex-col justify-center items-center relative overflow-hidden group min-h-[440px]">
+          <div className="space-y-6 relative z-10 w-full flex flex-col items-center">
+            <div className="inline-flex flex-col items-center gap-1 px-5 py-3 rounded-2xl bg-white/5 border border-white/10 mb-4 transition-all">
               <InteractiveText className="text-[11px] font-black tracking-[0.15em]" brightness={0.6} baseColor="text-white/70">
                 {CONFIG.hero.badgeLine1}
               </InteractiveText>
@@ -423,19 +484,19 @@ const App: React.FC = () => (
               </InteractiveText>
             </div>
 
-            <div className="grid grid-cols-[repeat(6,1em)] text-5xl md:text-7xl font-black leading-[1.05] tracking-normal">
+            <div className="grid grid-cols-[repeat(6,1em)] text-5xl md:text-7xl font-black leading-[1.05] tracking-normal justify-center">
               <SlotText targetText={CONFIG.hero.titleLine1} />
               <div className="mt-2 col-span-6 tracking-normal">
-                <span className="text-rainbow block w-full text-left">
+                <span className="text-rainbow block w-full text-center">
                   {CONFIG.hero.titleLine2}
                 </span>
               </div>
             </div>
 
-            <p className="text-zinc-400 text-base md:text-lg max-w-lg font-medium leading-relaxed">
+            <p className="text-zinc-400 text-base md:text-lg max-w-lg font-medium leading-relaxed text-center">
               {CONFIG.hero.description}
             </p>
-            <div className="flex flex-col sm:flex-row items-center gap-3 pt-6">
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-6 w-full">
               <a href={CONFIG.download.url} className="w-full sm:w-auto px-8 py-4 bg-white/90 rounded-2xl transition-all hover:bg-white active:scale-95 shadow-lg shadow-white/5 overflow-hidden flex items-center justify-center gap-2">
                 <Download size={20} strokeWidth={3} className="text-black" />
                 <InteractiveText brightness={0.6} baseColor="text-black" className="font-black">
@@ -453,7 +514,7 @@ const App: React.FC = () => (
         </div>
 
         {/* Intro Card */}
-        <div id="intro" className="lg:col-span-4 glass p-8 rounded-[32px] flex flex-col justify-between border-white/5 scroll-mt-24">
+        <div id="intro" className="lg:col-span-4 glass p-8 rounded-[32px] flex flex-col justify-between border-white/5 scroll-mt-24 content-visibility-auto min-h-[540px]">
           <div className="space-y-6">
             <InteractiveText className="text-xl font-bold" brightness={0.6}>{CONFIG.intro.title}</InteractiveText>
             <SequentialFlow paragraphs={CONFIG.intro.paragraphs} />
@@ -471,7 +532,7 @@ const App: React.FC = () => (
       </div>
 
       {/* Row 2: Features */}
-      <div id="features" className="grid grid-cols-1 md:grid-cols-3 gap-4 scroll-mt-24">
+      <div id="features" className="grid grid-cols-1 md:grid-cols-3 gap-4 scroll-mt-24 content-visibility-auto">
         {CONFIG.features.items.map((m, i) => {
           const colors = getColorStyles(m.colorType);
           return (
@@ -490,7 +551,7 @@ const App: React.FC = () => (
       </div>
 
       {/* Row 3: Tech & Demo */}
-      <div id="tech" className="grid grid-cols-1 lg:grid-cols-12 gap-4 scroll-mt-24">
+      <div id="tech" className="grid grid-cols-1 lg:grid-cols-12 gap-4 scroll-mt-24 content-visibility-auto">
         <div className="lg:col-span-12 xl:col-span-5 glass p-8 rounded-[32px] relative overflow-hidden group float-hanging">
           <TypingDemo />
         </div>
@@ -523,7 +584,7 @@ const App: React.FC = () => (
       </div>
 
       {/* Row 4: Shortcuts */}
-      <div className="glass p-10 rounded-[32px] overflow-hidden relative border-white/5">
+      <div className="glass p-10 rounded-[32px] overflow-hidden relative border-white/5 content-visibility-auto">
         <div className="flex flex-col md:flex-row justify-between items-center gap-10 relative z-10">
           <div className="space-y-5 text-center md:text-left max-w-lg">
             <h3 className="text-xl font-bold text-white/90 flex items-center justify-center md:justify-start gap-3">
@@ -555,7 +616,7 @@ const App: React.FC = () => (
       </div>
 
       {/* Footer */}
-      <footer id="footer" className="glass rounded-[40px] p-8 md:p-12 relative overflow-hidden scroll-mt-24">
+      <footer id="footer" className="glass rounded-[40px] p-8 md:p-12 relative overflow-hidden scroll-mt-24 content-visibility-auto">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 border-b border-white/5 pb-12 items-center relative z-10">
           <div className="lg:col-span-4 flex flex-col items-center text-center space-y-8">
             <div className="space-y-6">
