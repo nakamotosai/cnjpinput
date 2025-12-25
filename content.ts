@@ -29,7 +29,8 @@ export const CONFIG = {
     badge: "适用Windows系统，配合麦克风达到极致语音输入体验",
     titleLine1: "极速语音识别",
     titleLine2: "跨越语言鸿沟",
-    description: "为不精通日语的你而生。打破翻译-复制-粘贴的繁琐循环，内置离线 AI 引擎，让交流如原生般流畅。1.0初版已正式发布。",
+    description: "下载包已内置离线 AI 引擎，让交流如原生般流畅。当前为1.0内测版，如遇到杀毒软件误拦截请放行后才能安装使用。",
+
     downloadBtnMirror: "Win版国内镜像",
     downloadBtnGlobal: "Win版国际直联"
   },

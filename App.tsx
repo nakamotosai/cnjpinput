@@ -369,7 +369,9 @@ const Navbar: React.FC = () => {
       <div className="max-w-6xl mx-auto px-6 flex justify-between items-center relative min-h-[56px]">
         {/* Logo - Left aligned */}
         <div className="flex items-center gap-4 group cursor-pointer relative z-10" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
-          <AppLogo size="w-14 h-14" fontSize="text-[12px]" />
+          <div className="shadow-[0_0_15px_rgba(255,255,255,0.5)] rounded-xl">
+            <AppLogo size="w-14 h-14" fontSize="text-[12px]" />
+          </div>
           <div className="flex flex-col leading-tight">
             <InteractiveText className="text-2xl font-black tracking-tight" brightness={0.6}>{CONFIG.site.name}</InteractiveText>
             <span className="text-zinc-500 font-bold text-[10px] tracking-[0.2em] uppercase">{CONFIG.site.enName}</span>
@@ -395,7 +397,7 @@ const Navbar: React.FC = () => {
           href={CONFIG.download.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="w-14 h-14 glass flex flex-col items-center justify-center text-white rounded-2xl text-[11px] font-black leading-tight hover:bg-white/10 transition-all active:scale-95 border border-white/10 relative z-10"
+          className="w-14 h-14 glass flex flex-col items-center justify-center text-white rounded-2xl text-[11px] font-black leading-tight hover:bg-white/10 transition-all active:scale-95 border border-white/10 relative z-10 shadow-[0_0_20px_rgba(255,255,255,0.3)]"
         >
           <InteractiveText brightness={0.6} baseColor="text-white">
             <span className="block">立即</span>
