@@ -134,39 +134,55 @@ const CustomCursor: React.FC = () => {
   );
 };
 
+function usePerformanceLogger() {
+  useEffect(() => {
+    let frameCount = 0;
+    let lastTime = performance.now();
+
+    const checkPerf = () => {
+      const now = performance.now();
+      frameCount++;
+
+      if (now - lastTime >= 5000) {
+        const fps = Math.round((frameCount * 1000) / (now - lastTime));
+        const memory = (performance as any).memory;
+
+        console.log(`[Perf] FPS: ${fps}`);
+        if (memory) {
+          console.log(`[Perf] Heap: ${Math.round(memory.usedJSHeapSize / 1024 / 1024)}MB / ${Math.round(memory.jsHeapSizeLimit / 1024 / 1024)}MB`);
+        }
+
+        frameCount = 0;
+        lastTime = now;
+      }
+
+      requestAnimationFrame(checkPerf);
+    };
+
+    const rAF = requestAnimationFrame(checkPerf);
+    return () => cancelAnimationFrame(rAF);
+  }, []);
+}
+
 // ----------------------------------------------------------------------
 // Mouse Glow Effect Component
 // ----------------------------------------------------------------------
 const MouseGlow: React.FC = () => {
-  const glowRef = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
-    let rAFId: number;
-    // 使用 mutable object 存储坐标
-    // pos: 鼠标实时目标位置
-    // current: 光球当前位置 (用于实现平滑跟随)
+    const rAFRef = { current: 0 };
     const pos = { x: -1000, y: -1000 };
-    const current = { x: -1000, y: -1000 };
+    const lastPos = { x: -1000, y: -1000 };
 
     const update = () => {
-      // 1. 直接更新 CSS 变量，供 InteractiveText 和 CustomCursor 使用
-      // 文字光效和鼠标指针应当是"跟手"的，所以使用实时鼠标坐标
-      document.documentElement.style.setProperty('--mouse-x', `${pos.x}px`);
-      document.documentElement.style.setProperty('--mouse-y', `${pos.y}px`);
-
-      // 2. 光球使用 LERP (线性插值) 实现平滑延迟跟随效果
-      // 缓动系数 0.08，数值越小越迟缓 (原版 CSS transition duration-1000 约等于极低的缓动)
-      const ease = 0.08;
-      // 简单的线性插值算法: 当前值 += (目标值 - 当前值) * 系数
-      current.x += (pos.x - current.x) * ease;
-      current.y += (pos.y - current.y) * ease;
-
-      // 3. 直接操作 DOM 变换，避开 React Render Cycle
-      if (glowRef.current) {
-        glowRef.current.style.transform = `translate3d(${current.x - 200}px, ${current.y - 200}px, 0)`;
+      // Optimization: Only update DOM if position definitely changed
+      // This prevents global style recalculations when mouse is stationary
+      if (Math.abs(pos.x - lastPos.x) > 0.1 || Math.abs(pos.y - lastPos.y) > 0.1) {
+        document.documentElement.style.setProperty('--mouse-x', `${pos.x}px`);
+        document.documentElement.style.setProperty('--mouse-y', `${pos.y}px`);
+        lastPos.x = pos.x;
+        lastPos.y = pos.y;
       }
-
-      rAFId = requestAnimationFrame(update);
+      rAFRef.current = requestAnimationFrame(update);
     };
 
     const handleMouseMove = (e: MouseEvent) => {
@@ -175,37 +191,17 @@ const MouseGlow: React.FC = () => {
     };
 
     window.addEventListener('mousemove', handleMouseMove);
-    // 启动动画循环
-    rAFId = requestAnimationFrame(update);
+    rAFRef.current = requestAnimationFrame(update);
 
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
-      cancelAnimationFrame(rAFId);
+      cancelAnimationFrame(rAFRef.current);
     };
   }, []);
 
   return (
     <>
       <CustomCursor />
-      <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden" aria-hidden="true">
-        <div
-          ref={glowRef}
-          className="absolute w-[400px] h-[400px] rounded-full transition-opacity duration-1000 ease-out opacity-40 mix-blend-screen"
-          style={{
-            // 初始位置移出屏幕
-            transform: 'translate3d(-1000px, -1000px, 0)',
-            background: `radial-gradient(circle, 
-              rgba(255, 50, 50, 0.4) 0%, 
-              rgba(255, 200, 50, 0.35) 20%, 
-              rgba(50, 255, 100, 0.3) 40%, 
-              rgba(50, 150, 255, 0.35) 60%, 
-              rgba(180, 50, 255, 0.4) 80%, 
-              transparent 100%)`,
-            filter: 'blur(70px)',
-            willChange: 'transform' // 提示浏览器开启 GPU 层
-          }}
-        />
-      </div>
     </>
   );
 };
@@ -219,6 +215,7 @@ const SlotText: React.FC<{ targetText: string }> = ({ targetText }) => {
   const randomChars = "语速意见识别中日跨沟越语言人工智能翻译极速天地雷动语音交流识别灵感核心";
 
   useEffect(() => {
+    const rAFRef = { current: 0 };
     let startTime = Date.now();
     const cycleDuration = 8000;
 
@@ -237,19 +234,41 @@ const SlotText: React.FC<{ targetText: string }> = ({ targetText }) => {
         for (let i = 0; i < targetText.length; i++) newLocked.add(i);
       }
 
-      setLockedIndices(newLocked);
-      setDisplayText(prev =>
-        targetText.split("").map((char, i) => {
+      // Check if locked indices have changed to avoid unnecessary re-renders
+      setLockedIndices(prev => {
+        if (prev.size === newLocked.size && [...prev].every(val => newLocked.has(val))) {
+          return prev;
+        }
+        return newLocked;
+      });
+
+      // Conditional Update for Display Text
+      setDisplayText(prev => {
+        // Only update if not fully locked (performance optimization)
+        if (newLocked.size === targetText.length) {
+          // Ensure final state is correct, then stop updating
+          const isRefCorrect = prev.join('') === targetText;
+          return isRefCorrect ? prev : targetText.split("");
+        }
+
+        return targetText.split("").map((char, i) => {
           if (newLocked.has(i)) return char;
           return randomChars[Math.floor(Math.random() * randomChars.length)];
-        })
-      );
+        });
+      });
 
-      requestAnimationFrame(update);
+      if (elapsed >= 4000) {
+        const timeToNextCycle = cycleDuration - elapsed;
+        setTimeout(() => {
+          rAFRef.current = requestAnimationFrame(update);
+        }, timeToNextCycle);
+      } else {
+        rAFRef.current = requestAnimationFrame(update);
+      }
     };
 
-    const rafId = requestAnimationFrame(update);
-    return () => cancelAnimationFrame(rafId);
+    rAFRef.current = requestAnimationFrame(update);
+    return () => cancelAnimationFrame(rAFRef.current);
   }, [targetText]);
 
   return (
@@ -387,7 +406,7 @@ const Navbar: React.FC = () => {
               onClick={(e) => handleNavClick(e, item.href)}
               className="hover:text-white transition-colors relative py-2"
             >
-              <InteractiveText brightness={0.4}>{item.label}</InteractiveText>
+              {item.label}
             </a>
           ))}
         </div>
@@ -399,10 +418,10 @@ const Navbar: React.FC = () => {
           rel="noopener noreferrer"
           className="w-14 h-14 glass flex flex-col items-center justify-center text-white rounded-2xl text-[11px] font-black leading-tight hover:bg-white/10 transition-all active:scale-95 border border-white/10 relative z-10 shadow-[0_0_20px_rgba(255,255,255,0.3)]"
         >
-          <InteractiveText brightness={0.6} baseColor="text-white">
+          <div className="text-white flex flex-col items-center">
             <span className="block">立即</span>
             <span className="block">下载</span>
-          </InteractiveText>
+          </div>
         </a>
       </div>
     </nav>
@@ -466,233 +485,236 @@ const TypingDemo: React.FC = () => {
   );
 };
 
-const App: React.FC = () => (
-  <div className="min-h-screen selection:bg-white/20 text-zinc-400 pb-12 bg-[#0a0a0a] relative overflow-x-hidden">
-    <MouseGlow />
-    <Navbar />
+const App: React.FC = () => {
+  usePerformanceLogger();
+  return (
+    <div className="min-h-screen selection:bg-white/20 text-zinc-400 pb-12 bg-[#0a0a0a] relative overflow-x-hidden">
+      <MouseGlow />
+      <Navbar />
 
-    <main className="pt-24 px-6 max-w-6xl mx-auto space-y-4 relative z-10">
-      {/* Row 1: Hero & Intro */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Hero Card */}
-        <div className="lg:col-span-8 glass p-8 md:p-12 rounded-[32px] flex flex-col justify-center items-center relative overflow-hidden group min-h-[440px]">
-          <div className="space-y-6 relative z-10 w-full flex flex-col items-center">
-            <div className="inline-flex flex-col items-center gap-1 px-5 py-3 rounded-2xl bg-white/5 border border-white/10 mb-4 transition-all">
-              <InteractiveText className="text-[11px] font-black tracking-[0.15em]" brightness={0.6} baseColor="text-white/70">
-                {CONFIG.hero.badgeLine1}
-              </InteractiveText>
-              <InteractiveText className="text-sm font-bold tracking-[0.2em]" brightness={0.6} baseColor="text-white">
-                {CONFIG.hero.badge}
-              </InteractiveText>
-            </div>
-
-            <div className="grid grid-cols-[repeat(6,1em)] text-5xl md:text-7xl font-black leading-[1.05] tracking-normal justify-center">
-              <SlotText targetText={CONFIG.hero.titleLine1} />
-              <div className="mt-2 col-span-6 tracking-normal">
-                <span className="text-rainbow block w-full text-center">
-                  {CONFIG.hero.titleLine2}
-                </span>
-              </div>
-            </div>
-
-            <p className="text-zinc-400 text-base md:text-lg max-w-lg font-medium leading-relaxed text-center">
-              {CONFIG.hero.description}
-            </p>
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-6 w-full">
-              <a href={CONFIG.download.url} className="w-full sm:w-auto px-8 py-4 bg-white/90 rounded-2xl transition-all hover:bg-white active:scale-95 shadow-lg shadow-white/5 overflow-hidden flex items-center justify-center gap-2">
-                <Download size={20} strokeWidth={3} className="text-black" />
-                <InteractiveText brightness={0.6} baseColor="text-black" className="font-black">
-                  {CONFIG.hero.downloadBtnMirror}
+      <main className="pt-24 px-6 max-w-6xl mx-auto space-y-4 relative z-10">
+        {/* Row 1: Hero & Intro */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          {/* Hero Card */}
+          <div className="lg:col-span-8 glass p-8 md:p-12 rounded-[32px] flex flex-col justify-center items-center relative overflow-hidden group min-h-[440px]">
+            <div className="space-y-6 relative z-10 w-full flex flex-col items-center">
+              <div className="inline-flex flex-col items-center gap-1 px-5 py-3 rounded-2xl bg-white/5 border border-white/10 mb-4 transition-all">
+                <InteractiveText className="text-[11px] font-black tracking-[0.15em]" brightness={0.6} baseColor="text-white/70">
+                  {CONFIG.hero.badgeLine1}
                 </InteractiveText>
-              </a>
-              <a href={CONFIG.download.urlInternational} className="w-full sm:w-auto px-8 py-4 bg-white/5 border border-white/10 rounded-2xl transition-all hover:bg-white/10 active:scale-95 flex items-center justify-center gap-2">
-                <Download size={18} className="text-white" />
-                <InteractiveText brightness={0.6} baseColor="text-white" className="font-bold">
-                  {CONFIG.hero.downloadBtnGlobal}
+                <InteractiveText className="text-sm font-bold tracking-[0.2em]" brightness={0.6} baseColor="text-white">
+                  {CONFIG.hero.badge}
                 </InteractiveText>
-              </a>
-            </div>
-          </div>
-        </div>
-
-        {/* Intro Card */}
-        <div id="intro" className="lg:col-span-4 glass p-8 rounded-[32px] flex flex-col justify-between border-white/5 scroll-mt-24 content-visibility-auto min-h-[540px]">
-          <div className="space-y-6">
-            <InteractiveText className="text-xl font-bold" brightness={0.6}>{CONFIG.intro.title}</InteractiveText>
-            <SequentialFlow paragraphs={CONFIG.intro.paragraphs} />
-          </div>
-          <div className="pt-6 border-t border-white/5 flex items-center gap-3 mt-8">
-            <div className="w-10 h-10 rounded-xl overflow-hidden bg-zinc-800 border border-white/10 shrink-0">
-              <img src={CONFIG.intro.author.avatarUrl} className="w-full h-full object-cover opacity-80" />
-            </div>
-            <div>
-              <InteractiveText className="font-bold text-sm block" brightness={0.6}>{CONFIG.intro.author.name}</InteractiveText>
-              <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">{CONFIG.intro.author.role}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Row 2: Features */}
-      <div id="features" className="grid grid-cols-1 md:grid-cols-3 gap-4 scroll-mt-24 content-visibility-auto">
-        {CONFIG.features.items.map((m, i) => {
-          const colors = getColorStyles(m.colorType);
-          return (
-            <div key={i} className="glass p-8 rounded-[32px] transition-all group border-white/5">
-              <div className={`w-12 h-12 rounded-2xl ${colors.bg} flex items-center justify-center mb-8 border border-white/5 group-hover:scale-105 transition-transform`}>
-                {getIcon(m.icon, 24, colors.text)}
               </div>
-              <div className="space-y-3">
-                <span className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500">{m.highlight}</span>
-                <InteractiveText className="text-lg font-bold block" brightness={0.6}>{m.title}</InteractiveText>
-                <p className="text-sm text-zinc-500 font-medium leading-relaxed">{m.desc}</p>
-              </div>
-            </div>
-          );
-        })}
-      </div>
 
-      {/* Row 3: Tech & Demo */}
-      <div id="tech" className="grid grid-cols-1 lg:grid-cols-12 gap-4 scroll-mt-24 content-visibility-auto">
-        <div className="lg:col-span-12 xl:col-span-5 glass p-8 rounded-[32px] relative overflow-hidden group float-hanging">
-          <TypingDemo />
-        </div>
-
-        <div className="lg:col-span-12 xl:col-span-7 grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="md:col-span-2 glass p-8 rounded-[32px] flex items-center gap-6 border-white/5">
-            <div className="w-14 h-14 bg-white/5 rounded-2xl flex items-center justify-center shrink-0 border border-white/10">
-              <Cpu className="text-white/80" size={28} />
-            </div>
-            <div>
-              <InteractiveText className="font-bold text-lg block" brightness={0.6}>{CONFIG.tech.specs[0].title}</InteractiveText>
-              <p className="text-xs text-zinc-500 font-medium mt-1 leading-relaxed">{CONFIG.tech.specs[0].desc}</p>
-            </div>
-          </div>
-          {CONFIG.tech.specs.slice(1).map((spec, i) => {
-            const colors = getColorStyles(spec.colorType);
-            return (
-              <div key={i} className="glass p-8 rounded-[28px] border-white/5">
-                <div className={`w-10 h-10 ${colors.bg} rounded-xl flex items-center justify-center border border-white/5`}>
-                  {getIcon(spec.icon, 20, colors.text)}
+              <div className="grid grid-cols-[repeat(6,1em)] text-5xl md:text-7xl font-black leading-[1.05] tracking-normal justify-center">
+                <SlotText targetText={CONFIG.hero.titleLine1} />
+                <div className="mt-2 col-span-6 tracking-normal">
+                  <span className="text-rainbow block w-full text-center">
+                    {CONFIG.hero.titleLine2}
+                  </span>
                 </div>
-                <div className="mt-8">
-                  <InteractiveText className="font-bold block" brightness={0.6}>{spec.title}</InteractiveText>
-                  <p className="text-xs text-zinc-500 font-medium mt-1 leading-relaxed">{spec.desc}</p>
+              </div>
+
+              <p className="text-zinc-400 text-base md:text-lg max-w-lg font-medium leading-relaxed text-center">
+                {CONFIG.hero.description}
+              </p>
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-6 w-full">
+                <a href={CONFIG.download.url} className="w-full sm:w-auto px-8 py-4 bg-white/90 rounded-2xl transition-all hover:bg-white active:scale-95 shadow-lg shadow-white/5 overflow-hidden flex items-center justify-center gap-2">
+                  <Download size={20} strokeWidth={3} className="text-black" />
+                  <InteractiveText brightness={0.6} baseColor="text-black" className="font-black">
+                    {CONFIG.hero.downloadBtnMirror}
+                  </InteractiveText>
+                </a>
+                <a href={CONFIG.download.urlInternational} className="w-full sm:w-auto px-8 py-4 bg-white/5 border border-white/10 rounded-2xl transition-all hover:bg-white/10 active:scale-95 flex items-center justify-center gap-2">
+                  <Download size={18} className="text-white" />
+                  <InteractiveText brightness={0.6} baseColor="text-white" className="font-bold">
+                    {CONFIG.hero.downloadBtnGlobal}
+                  </InteractiveText>
+                </a>
+              </div>
+            </div>
+          </div>
+
+          {/* Intro Card */}
+          <div id="intro" className="lg:col-span-4 glass p-8 rounded-[32px] flex flex-col justify-between border-white/5 scroll-mt-24 content-visibility-auto min-h-[540px]">
+            <div className="space-y-6">
+              <InteractiveText className="text-xl font-bold" brightness={0.6}>{CONFIG.intro.title}</InteractiveText>
+              <SequentialFlow paragraphs={CONFIG.intro.paragraphs} />
+            </div>
+            <div className="pt-6 border-t border-white/5 flex items-center gap-3 mt-8">
+              <div className="w-10 h-10 rounded-xl overflow-hidden bg-zinc-800 border border-white/10 shrink-0">
+                <img src={CONFIG.intro.author.avatarUrl} className="w-full h-full object-cover opacity-80" />
+              </div>
+              <div>
+                <span className="font-bold text-sm block text-zinc-200">{CONFIG.intro.author.name}</span>
+                <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">{CONFIG.intro.author.role}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Row 2: Features */}
+        <div id="features" className="grid grid-cols-1 md:grid-cols-2 gap-4 scroll-mt-24 content-visibility-auto">
+          {CONFIG.features.items.map((m, i) => {
+            const colors = getColorStyles(m.colorType);
+            return (
+              <div key={i} className="glass p-8 rounded-[32px] transition-all group border-white/5">
+                <div className={`w-12 h-12 rounded-2xl ${colors.bg} flex items-center justify-center mb-8 border border-white/5 group-hover:scale-105 transition-transform`}>
+                  {getIcon(m.icon, 24, colors.text)}
+                </div>
+                <div className="space-y-3">
+                  <span className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500">{m.highlight}</span>
+                  <span className="text-lg font-bold block text-zinc-200 group-hover:text-white transition-colors">{m.title}</span>
+                  <p className="text-sm text-zinc-500 font-medium leading-relaxed">{m.desc}</p>
                 </div>
               </div>
             );
           })}
         </div>
-      </div>
 
-      {/* Row 4: Shortcuts */}
-      <div className="glass p-10 rounded-[32px] overflow-hidden relative border-white/5 content-visibility-auto">
-        <div className="flex flex-col md:flex-row justify-between items-center gap-10 relative z-10">
-          <div className="space-y-5 text-center md:text-left max-w-lg">
-            <h3 className="text-xl font-bold text-white/90 flex items-center justify-center md:justify-start gap-3">
-              <div className="p-2.5 bg-white/5 rounded-xl border border-white/10 shadow-lg"><Command size={22} className="text-white" strokeWidth={2.5} /></div>
-              <InteractiveText brightness={0.6}>{CONFIG.tech.shortcuts.title}</InteractiveText>
-            </h3>
-            <p className="text-sm text-zinc-500 font-medium border-l-0 md:border-l-2 border-white/5 pl-0 md:pl-5 py-1.5 leading-relaxed">
-              "{CONFIG.tech.shortcuts.tip}"
-            </p>
+        {/* Row 3: Tech & Demo */}
+        <div id="tech" className="grid grid-cols-1 lg:grid-cols-12 gap-4 scroll-mt-24 content-visibility-auto">
+          <div className="lg:col-span-12 xl:col-span-6 glass p-8 rounded-[32px] relative overflow-hidden group">
+            <TypingDemo />
           </div>
-          <div className="flex flex-row gap-5 justify-center flex-wrap md:flex-nowrap">
-            {CONFIG.tech.shortcuts.keys.map((s, i) => (
-              <div key={i} className="flex flex-col items-center glass p-8 rounded-[32px] min-w-[180px] transition-transform hover:scale-105 border-white/5 shadow-xl">
-                <div className="flex gap-2 mb-4">
-                  {s.keys.map((k, j) => (
-                    <React.Fragment key={j}>
-                      <kbd className="px-4 py-2 rainbow-bg-flow rounded-xl text-sm font-mono font-black text-white shadow-[0_5px_15px_rgba(0,0,0,0.3)] [text-shadow:0_1px_2px_rgba(0,0,0,0.8)] border-white/20">
-                        {k}
-                      </kbd>
-                      {j < s.keys.length - 1 && <span className="text-zinc-600 self-center text-base font-bold">+</span>}
-                    </React.Fragment>
-                  ))}
-                </div>
-                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.25em]">{s.label}</span>
+
+          <div className="lg:col-span-12 xl:col-span-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="md:col-span-2 glass p-8 rounded-[32px] flex items-center gap-6 border-white/5">
+              <div className="w-14 h-14 bg-white/5 rounded-2xl flex items-center justify-center shrink-0 border border-white/10">
+                <Cpu className="text-white/80" size={28} />
               </div>
-            ))}
+              <div>
+                <span className="font-bold text-lg block text-zinc-200">{CONFIG.tech.specs[0].title}</span>
+                <p className="text-xs text-zinc-500 font-medium mt-1 leading-relaxed">{CONFIG.tech.specs[0].desc}</p>
+              </div>
+            </div>
+            {CONFIG.tech.specs.slice(1).map((spec, i) => {
+              const colors = getColorStyles(spec.colorType);
+              return (
+                <div key={i} className="md:col-span-2 glass p-8 rounded-[32px] flex items-center gap-6 border-white/5">
+                  <div className={`w-14 h-14 ${colors.bg} rounded-2xl flex items-center justify-center shrink-0 border border-white/5`}>
+                    {getIcon(spec.icon, 28, colors.text)}
+                  </div>
+                  <div>
+                    <span className="font-bold block text-zinc-200">{spec.title}</span>
+                    <p className="text-xs text-zinc-500 font-medium mt-1 leading-relaxed">{spec.desc}</p>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
-      </div>
 
-      {/* Footer */}
-      <footer id="footer" className="glass rounded-[40px] p-8 md:p-12 relative overflow-hidden scroll-mt-24 content-visibility-auto">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 border-b border-white/5 pb-12 items-center relative z-10">
-          <div className="lg:col-span-4 flex flex-col items-center text-center space-y-8">
-            <div className="space-y-6">
-              <div className="flex flex-col items-center gap-3">
-                <AppLogo size="w-12 h-12" />
-                <div className="flex flex-col leading-tight">
-                  <InteractiveText className="text-2xl font-black tracking-tight block" brightness={0.6}>{CONFIG.site.name}</InteractiveText>
-                  <span className="text-zinc-600 font-bold text-[10px] tracking-[0.4em] uppercase">{CONFIG.site.enName}</span>
-                </div>
-              </div>
-              <p className="text-sm text-zinc-500 leading-relaxed font-medium max-w-[260px]">
-                {CONFIG.footer.desc}
+        {/* Row 4: Shortcuts */}
+        <div className="glass p-10 rounded-[32px] overflow-hidden relative border-white/5 content-visibility-auto">
+          <div className="flex flex-col md:flex-row justify-between items-center gap-10 relative z-10">
+            <div className="space-y-5 text-center md:text-left max-w-lg">
+              <h3 className="text-xl font-bold text-white/90 flex items-center justify-center md:justify-start gap-3">
+                <div className="p-2.5 bg-white/5 rounded-xl border border-white/10 shadow-lg"><Command size={22} className="text-white" strokeWidth={2.5} /></div>
+                <span>{CONFIG.tech.shortcuts.title}</span>
+              </h3>
+              <p className="text-sm text-zinc-500 font-medium border-l-0 md:border-l-2 border-white/5 pl-0 md:pl-5 py-1.5 leading-relaxed">
+                "{CONFIG.tech.shortcuts.tip}"
               </p>
             </div>
-
-            <div className="pt-2">
-              <a href={CONFIG.download.url} target="_blank" rel="noopener noreferrer" className="group relative inline-flex items-center justify-center px-10 py-4 rounded-2xl overflow-hidden shadow-2xl transition-all hover:scale-105 active:scale-95 bg-white">
-                <div className="absolute inset-0 bg-gradient-to-r from-blue-400 via-purple-500 to-emerald-400 opacity-0 group-hover:opacity-20 transition-opacity animate-rainbow-flow blur-xl"></div>
-                <div className="absolute -inset-[2px] bg-gradient-to-r from-blue-500 via-purple-500 to-emerald-500 rounded-2xl opacity-0 group-hover:opacity-40 blur-md transition-opacity animate-pulse"></div>
-                <span className="relative flex items-center gap-2">
-                  <Download size={18} strokeWidth={3} className="text-black" />
-                  <InteractiveText brightness={0.6} baseColor="text-black" className="font-black">立即下载</InteractiveText>
-                </span>
-              </a>
+            <div className="flex flex-row gap-5 justify-center flex-wrap md:flex-nowrap">
+              {CONFIG.tech.shortcuts.keys.map((s, i) => (
+                <div key={i} className="flex flex-col items-center glass p-8 rounded-[32px] min-w-[180px] transition-transform hover:scale-105 border-white/5 shadow-xl">
+                  <div className="flex gap-2 mb-4">
+                    {s.keys.map((k, j) => (
+                      <React.Fragment key={j}>
+                        <kbd className="px-4 py-2 rainbow-bg-flow rounded-xl text-sm font-mono font-black text-white shadow-[0_5px_15px_rgba(0,0,0,0.3)] [text-shadow:0_1px_2px_rgba(0,0,0,0.8)] border-white/20">
+                          {k}
+                        </kbd>
+                        {j < s.keys.length - 1 && <span className="text-zinc-600 self-center text-base font-bold">+</span>}
+                      </React.Fragment>
+                    ))}
+                  </div>
+                  <span className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.25em]">{s.label}</span>
+                </div>
+              ))}
             </div>
           </div>
+        </div>
 
-          <div className="lg:col-span-8 grid grid-cols-1 md:grid-cols-2 gap-6 lg:pl-12 border-t lg:border-t-0 lg:border-l border-white/5 pt-12 lg:pt-0">
-            {/* Combined Links Grid */}
-            {[
-              { label: CONFIG.footer.contact.wechatLabel, val: CONFIG.footer.contact.wechat, icon: 'wechat', img: CONFIG.intro.author.avatarUrl, url: "#" },
-              { label: "实时新闻", val: CONFIG.footer.works[0].desc, icon: 'news', url: CONFIG.footer.works[0].url },
-              { label: CONFIG.footer.contact.homepageLabel, val: CONFIG.footer.contact.homepage, icon: 'home', img: CONFIG.footer.contact.homepageLogo, url: CONFIG.footer.contact.homepage },
-              { label: "Suno 音乐", val: CONFIG.footer.works[1].desc, icon: 'music', url: CONFIG.footer.works[1].url },
-              { label: CONFIG.footer.contact.wechatOALabel, val: CONFIG.footer.contact.wechatOA, icon: 'wechat', img: CONFIG.footer.contact.wechatOALogo, url: CONFIG.footer.contact.wechatOAUrl },
-              { label: "邮件联系", val: CONFIG.footer.works[2].desc, icon: 'mail', url: CONFIG.footer.works[2].url }
-            ].map((item, i) => (
-              <a
-                key={i}
-                href={item.url}
-                target={item.url.startsWith('http') ? "_blank" : undefined}
-                rel={item.url.startsWith('http') ? "noopener noreferrer" : undefined}
-                className="flex items-center gap-4 p-4 rounded-3xl border border-transparent hover:bg-white/5 transition-all group cursor-pointer"
-              >
-                <div className="w-14 h-14 rounded-2xl bg-white/5 flex items-center justify-center shrink-0 border border-white/5 group-hover:bg-white/10 overflow-hidden transition-all">
-                  {item.img ? (
-                    <img src={item.img} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
-                  ) : (
-                    getIcon(item.icon, 24, "text-zinc-500 group-hover:text-white transition-colors")
-                  )}
+        {/* Footer */}
+        <footer id="footer" className="glass rounded-[40px] p-8 md:p-12 relative overflow-hidden scroll-mt-24 content-visibility-auto">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 border-b border-white/5 pb-12 items-center relative z-10">
+            <div className="lg:col-span-4 flex flex-col items-center text-center space-y-8">
+              <div className="space-y-6">
+                <div className="flex flex-col items-center gap-3">
+                  <AppLogo size="w-12 h-12" />
+                  <div className="flex flex-col leading-tight">
+                    <span className="text-2xl font-black tracking-tight block text-zinc-200">{CONFIG.site.name}</span>
+                    <span className="text-zinc-600 font-bold text-[10px] tracking-[0.4em] uppercase">{CONFIG.site.enName}</span>
+                  </div>
                 </div>
-                <div className="overflow-hidden text-left">
-                  <span className="block text-[10px] text-zinc-600 font-black uppercase tracking-[0.2em] mb-1">{item.label}</span>
-                  <InteractiveText className="text-sm font-black truncate block" brightness={0.5}>
-                    {item.val.replace('https://', '').split('/')[0]}
-                  </InteractiveText>
-                </div>
-              </a>
-            ))}
+                <p className="text-sm text-zinc-500 leading-relaxed font-medium max-w-[260px]">
+                  {CONFIG.footer.desc}
+                </p>
+              </div>
+
+              <div className="pt-2">
+                <a href={CONFIG.download.url} target="_blank" rel="noopener noreferrer" className="group relative inline-flex items-center justify-center px-10 py-4 rounded-2xl overflow-hidden shadow-2xl transition-all hover:scale-105 active:scale-95 bg-white">
+                  <div className="absolute inset-0 bg-gradient-to-r from-blue-400 via-purple-500 to-emerald-400 opacity-0 group-hover:opacity-20 transition-opacity animate-rainbow-flow blur-xl"></div>
+                  <div className="absolute -inset-[2px] bg-gradient-to-r from-blue-500 via-purple-500 to-emerald-500 rounded-2xl opacity-0 group-hover:opacity-40 blur-md transition-opacity animate-pulse"></div>
+                  <span className="relative flex items-center gap-2">
+                    <Download size={18} strokeWidth={3} className="text-black" />
+                    <span className="font-black text-black">立即下载</span>
+                  </span>
+                </a>
+              </div>
+            </div>
+
+            <div className="lg:col-span-8 grid grid-cols-1 md:grid-cols-2 gap-6 lg:pl-12 border-t lg:border-t-0 lg:border-l border-white/5 pt-12 lg:pt-0">
+              {/* Combined Links Grid */}
+              {[
+                { label: CONFIG.footer.contact.wechatLabel, val: CONFIG.footer.contact.wechat, icon: 'wechat', img: CONFIG.intro.author.avatarUrl, url: "#" },
+                { label: CONFIG.footer.works[0].title, val: CONFIG.footer.works[0].desc, icon: CONFIG.footer.works[0].icon, url: CONFIG.footer.works[0].url },
+                { label: CONFIG.footer.contact.homepageLabel, val: CONFIG.footer.contact.homepage, icon: 'home', img: CONFIG.footer.contact.homepageLogo, url: CONFIG.footer.contact.homepage },
+                { label: CONFIG.footer.works[1].title, val: CONFIG.footer.works[1].desc, icon: CONFIG.footer.works[1].icon, url: CONFIG.footer.works[1].url },
+                { label: CONFIG.footer.contact.wechatOALabel, val: CONFIG.footer.contact.wechatOA, icon: 'wechat', img: CONFIG.footer.contact.wechatOALogo, url: CONFIG.footer.contact.wechatOAUrl },
+                { label: CONFIG.footer.works[2].title, val: CONFIG.footer.works[2].desc, icon: CONFIG.footer.works[2].icon, url: CONFIG.footer.works[2].url }
+              ].map((item, i) => (
+                <a
+                  key={i}
+                  href={item.url}
+                  target={item.url.startsWith('http') ? "_blank" : undefined}
+                  rel={item.url.startsWith('http') ? "noopener noreferrer" : undefined}
+                  className="flex items-center gap-4 p-4 rounded-3xl border border-transparent hover:bg-white/5 transition-all group cursor-pointer"
+                >
+                  <div className="w-14 h-14 rounded-2xl bg-white/5 flex items-center justify-center shrink-0 border border-white/5 group-hover:bg-white/10 overflow-hidden transition-all">
+                    {item.img ? (
+                      <img src={item.img} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+                    ) : (
+                      getIcon(item.icon, 24, "text-zinc-500 group-hover:text-white transition-colors")
+                    )}
+                  </div>
+                  <div className="overflow-hidden text-left">
+                    <span className="block text-[10px] text-zinc-600 font-black uppercase tracking-[0.2em] mb-1">{item.label}</span>
+                    <span className="text-sm font-black truncate block text-zinc-400 group-hover:text-white transition-colors">
+                      {item.val.replace('https://', '').split('/')[0]}
+                    </span>
+                  </div>
+                </a>
+              ))}
+            </div>
           </div>
-        </div>
-        <div className="mt-12 flex flex-col md:flex-row justify-between items-center text-[10px] text-zinc-500 font-bold uppercase tracking-[0.25em] gap-6 relative z-10">
-          <p>{CONFIG.footer.copyright}</p>
-          <div className="flex gap-8">
-            {CONFIG.footer.legal.map(l => (
-              <a key={l.label} href={l.href} className="hover:text-white transition-colors border-b border-transparent hover:border-white/20 pb-0.5">
-                <InteractiveText brightness={0.4}>{l.label}</InteractiveText>
-              </a>
-            ))}
+          <div className="mt-12 flex flex-col md:flex-row justify-between items-center text-[10px] text-zinc-500 font-bold uppercase tracking-[0.25em] gap-6 relative z-10">
+            <p>{CONFIG.footer.copyright}</p>
+            <div className="flex gap-8">
+              {CONFIG.footer.legal.map(l => (
+                <a key={l.label} href={l.href} className="hover:text-white transition-colors border-b border-transparent hover:border-white/20 pb-0.5">
+                  {l.label}
+                </a>
+              ))}
+            </div>
           </div>
-        </div>
-      </footer>
-    </main>
-  </div>
-);
+        </footer>
+      </main>
+    </div>
+  );
+};
 
 export default App;
